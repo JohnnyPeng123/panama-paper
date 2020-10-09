@@ -1,0 +1,377 @@
+<html>
+
+<head>
+    <style>
+        body {
+            font-family: Helvetica, Arial, sans-serif
+        }
+
+        h1 {
+            background-color: #2a5599;
+            color: white;
+            padding: 5px;
+        }
+
+        svg {
+             border: 1px solid black;
+        }
+
+        .mainView {
+            display:flex;
+        }
+
+    </style>
+    <script src="https://d3js.org/d3.v6.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/alasql@0.6"></script>
+    
+</head>
+
+<body>
+    <h1>Panama Paper</h1>
+    <div class="mainView">
+        <div>
+            <h2>Offshore Countries</h2>
+            <svg id="OC"></svg>
+        </div>
+        <div>
+            <h2>Map</h2>
+            <svg id="Map"></svg>
+        </div>
+    </div>
+</body>
+
+ <script> 
+   let store = {}
+    function loadData() {
+        return Promise.all([
+            fetch('panama.txt')
+            .then(response => response.text())
+            .then(text => text.replaceAll('"', ''))
+            .then(text => text.replace(/([a-zA-Z :,.'´()Ã§]+)/g, "\"$1\""))
+            .then(text => text.replaceAll(': "', '": '))
+            .then(text => text.replace(/([0-9]+)/g, "\"$1\","))
+            .then(text => text.replaceAll(': {', ': [{'))
+            .then(text => text.replaceAll('}', '}],'))
+            .then(text => "{" + text)
+            .then(text => text + "}")
+            .then(text => text.replaceAll('{[', '{'))
+            .then(text => text.replaceAll(']}', '}'))
+            .then(text => text.replaceAll(/\,(?=\s*?[\}\]])/g, ""))
+            .then(text => text.replaceAll("Cayman Islands", "Cayman"))
+            .then(text => text.replaceAll("Wyoming", "United States"))
+            .then(text => text.replaceAll("United States Of America", "United States"))
+            .then(text => text.replaceAll("Ras Al Khaimah", "United Arab Emirates"))
+            .then(text => text.replaceAll("Sint Maarten (Dutch part)", "Netherlands"))
+            .then(text => text.replaceAll("Iran, Islamic Republic of", "Iran"))
+            .then(text => text.replaceAll("Nevada", "United States"))
+            .then(text => text.replaceAll("Labuan", "Malaysia"))
+            .then(text => text.replaceAll("Dubai", "United Arab Emirates"))
+            .then(text => text.replaceAll("Russian Federation", "Russia"))
+            .then(text => text.replaceAll("Virgin Islands, British", "British Virgin Islands"))
+            .then(text => text.replaceAll("Virgin Islands, U.S.", "U.S. Virgin Islands"))
+            .then(text => text.replaceAll("British Anguilla", "Anguilla"))
+            .then(text => text.replaceAll("Korea, Democratic People's Republic of", "North Korea"))
+            .then(text => text.replaceAll("Korea, Republic of", "South Korea"))
+            .then(text => text.replaceAll("Macao", "China"))
+            .then(text => text.replaceAll("Moldova, Republic of", "Moldova"))
+            .then(text => text.replaceAll("Tanzania, United Republic of", "Tanzania"))
+            .then(text => text.replaceAll("Venezuela, Bolivarian Republic of", "Venezuela"))
+            .then(text => text.replaceAll("Bolivia, Plurinational State of", "Bolivia"))
+            .then(text => text.replaceAll("Brunei Darussalam", "Brunei"))
+            .then(text => text.replaceAll("Isle of Man", "Isle Of Man"))
+            .then(text => text.replaceAll("St. Lucia", "Saint Lucia"))
+            .then(text => text.replaceAll("Macedonia, the Former Yugoslav Republic of", "Macedonia [FYROM]")),
+            d3.json("custom.geo.json"),
+            d3.csv("lat_long.csv")
+        ]).then(datasets => {
+            store.routes = JSON.parse(datasets[0]);
+            store.geoJSON = datasets[1];
+            store.lat_long = datasets[2];
+            
+            return store;
+        })
+    }
+
+    loadData().then(showData);
+
+    function showData() {
+        //Get the routes from our store variable
+        
+        let routes = store.routes
+        let result = {}
+
+        //Count and sort by the total number of incoming edges for each offsore countries
+        
+        for (target in routes) {
+            currentData = {
+                Target: target,
+                Count: 0
+            }
+
+           for (source in routes[target][0]) {
+                  currentData.Count += +routes[target][0][source]
+                }
+           result[target] = currentData      
+        }
+
+        result = Object.values(result).sort((x,y) => d3.descending(x.Count, y.Count))
+
+        // Draw Chart
+        drawBarChart(result);
+
+        // Draw Map
+        drawMap(store.geoJSON);
+
+        // Count distinct countries in the data
+
+        let all_countries = [];
+
+        for (target in routes) {
+              all_countries.push(target);
+              for (source in routes[target][0]) {
+              all_countries.push(source);
+            }
+        }
+
+        let unique_countries = Array.from(new Set(all_countries));
+
+        let countries = []
+
+        for (idx in unique_countries) {
+              countries.push({Country: unique_countries[idx]});
+        }
+
+        // Attach lat long to the distinct countries
+        alasql("CREATE TABLE countries_lat_long (Country string)");
+        alasql.tables.countries_lat_long.data = countries;
+
+        alasql("CREATE TABLE lat_long (latitude number, longitude number,country string)");
+        alasql.tables.lat_long.data = store.lat_long;
+
+        var country = alasql("SELECT Country, latitude, longitude FROM countries_lat_long a LEFT JOIN lat_long b ON a.Country = b.country");
+        
+        country = country.filter(d => typeof d.latitude !== "undefined");
+        drawCountries(country);
+
+
+        let routes_array = [];
+
+        for (target in routes) {
+              for (source in routes[target][0]) {
+              routes_array.push({Targets: target, Sources: source, edge_w: +routes[target][0][source]});
+            }
+        }
+
+        alasql("CREATE TABLE routes (Sources string, Targets string, edge_w number)");
+        alasql.tables.routes.data = routes_array;
+
+        var routes_lat_long = alasql("SELECT a.*, b.latitude as SourceLatitude, b.longitude as SourceLongitude, c.latitude as DestLatitude, c.longitude as DestLongitude  FROM routes a LEFT JOIN lat_long b ON a.Sources = b.country LEFT JOIN lat_long c ON a.Targets = c.country");
+
+        store.routes_lat_long = routes_lat_long.filter(d => typeof d.SourceLatitude !== "undefined").filter(d => typeof d.DestLatitude !== "undefined")
+    }
+
+    function getChartScales(result, config) {
+        let { bodyWidth, bodyHeight } = config;
+        let maximumCount = d3.max(result.map(a => a.Count))
+
+        let xScale = d3.scaleSqrt()
+            .range([0,bodyWidth])
+            .domain([0,maximumCount])
+
+        let yScale = d3.scaleBand()
+            .range([0, bodyHeight])
+            .domain(result.map(a => a.Target)) //The domain is the list of ailines names
+            .padding(0.2)
+            
+        return { xScale, yScale }
+    }
+
+    function getChartConfig() {
+        let width = 950;
+        let height = 900;
+        let margin = {
+            top: 10,
+            bottom: 50,
+            left: 160,
+            right: 10
+        }
+        //The body is the area that will be occupied by the bars.
+        let bodyHeight = height - margin.top - margin.bottom
+        let bodyWidth = width - margin.left - margin.right
+
+        //The container is the SVG where we will draw the chart. In our HTML is the svg ta with the id AirlinesChart
+        let container = d3.select("#OC")
+        container
+            .attr("width", width)
+            .attr("height", height)
+
+        return { width, height, margin, bodyHeight, bodyWidth, container }
+    }
+
+    function drawBars(result, scales, config) {
+      let {margin, container} = config; // this is equivalent to 'let margin = config.margin; let container = config.container'
+      let {xScale, yScale} = scales
+      let body = container.append("g")
+          .style("transform", 
+            `translate(${margin.left}px,${margin.top}px)`
+          )
+
+      let bars = body.selectAll(".bar").data(result)
+
+      //Adding a rect tag for each airline
+      bars.enter().append("rect")
+          .attr("height", yScale.bandwidth())
+          .attr("y", (d) => yScale(d.Target))
+          .attr("width", (d) => xScale(d.Count))
+          .attr("fill", "#2a5599")
+          .attr("temp_target", (d) => d.Target)
+          .on("mouseenter", function(d) { 
+             drawRoutes(d3.select(this).attr("temp_target"))
+             d3.select(this).attr("fill","#992a5b")
+           })
+          .on("mouseleave", function(d) { 
+             drawRoutes(null)
+             drawAllRoutes()
+             d3.select(this).attr("fill","#2a5599")})
+    }
+
+    function drawAxes(scales, config){
+      let {xScale, yScale} = scales
+      let {container, margin, height} = config;
+      let axisX = d3.axisBottom(xScale)
+                    .ticks(5)
+
+      container.append("g")
+        .style("transform", 
+            `translate(${margin.left}px,${height - margin.bottom}px)`
+        )
+        .call(axisX)
+
+      let axisY = d3.axisLeft(yScale)
+                    .ticks(5)
+
+      container.append("g")
+        .style("transform", 
+            `translate(${margin.left}px,${margin.top}px)`
+        )
+        .call(axisY)
+    }
+
+    function drawBarChart(result) {
+        let config = getChartConfig();
+        let scales = getChartScales(result, config);
+        drawBars(result,scales,config);
+        drawAxes(scales,config);
+    }
+
+    function getMapConfig(){
+      let width = 950;
+      let height = 900;
+      let container = d3.select("#Map")
+            .attr("width", width)
+            .attr("height", height)
+      return {width, height, container}
+    }
+
+    function getMapProjection(config) {
+      let {width, height} = config;
+      let projection = d3.geoMercator()
+      projection.scale(150)
+                .translate([width / 2, height / 2 + 20])
+                
+      store.mapProjection = projection;
+      return projection;
+    }
+
+    function drawBaseMap(container, countries, projection){
+      let path = d3.geoPath().projection(projection)
+      
+      container.selectAll("path").data(countries)
+          .enter().append("path")
+          .attr("d", d => path(d))
+          .attr("stroke", "#ccc")
+          .attr("fill", "#eee")
+    }
+ 
+   function drawMap(geoJson) {
+        let config = getMapConfig();
+        let projection = getMapProjection(config)
+        drawBaseMap(config.container, geoJson.features, projection)
+    }
+
+   function drawCountries(countries) {
+      let config = getMapConfig(); //get the config
+      let projection = getMapProjection(config); //get the projection
+      let container = config.container; //get the container
+            
+      let circles = container.selectAll("circle")
+                    .data(countries)
+                    .enter()
+                    .append("circle")
+                    .attr("r", 1)
+                    .attr("fill", "#2a5599")    
+                    .attr("cx", d => projection([+d.longitude, +d.latitude])[0])
+                    .attr("cy", d => projection([+d.longitude, +d.latitude])[1])                
+    }
+
+    function drawRoutes(Target) {
+        let routes = store.routes_lat_long
+        let projection = store.mapProjection
+        let container = d3.select("#Map")
+        let selectedRoutes = routes.filter(d => (d.Targets === Target))
+
+        let maximumWeight = d3.max(selectedRoutes.map(a => a.edge_w))
+        let wScale = d3.scaleSqrt()
+            .range([0,1])
+            .domain([0,maximumWeight])
+
+        let bindedData = container.selectAll("line")
+                         .data(selectedRoutes, d => d.Targets) //This second parameter tells D3 what to use to identify the routes, this hepls D3 to correctly find which routes have been added or removed.
+
+            bindedData.enter()
+                      .append("line")
+                      .attr("x1", d => projection([+d.SourceLongitude, +d.SourceLatitude])[0])
+                      .attr("y1", d => projection([+d.SourceLongitude, +d.SourceLatitude])[1])
+                      .attr("x2", d => projection([+d.DestLongitude, +d.DestLatitude])[0])
+                      .attr("y2", d => projection([+d.DestLongitude, +d.DestLatitude])[1])
+                      .style("stroke", "#992a2a")
+                      .style("opacity",(d) => wScale(d.edge_w))
+                                  
+            bindedData.exit()
+                      .remove()
+              
+
+    }
+
+    function drawAllRoutes() {
+        let routes = store.routes_lat_long
+        let projection = store.mapProjection
+        let container = d3.select("#Map")
+        let selectedRoutes = routes
+
+        let maximumWeight = d3.max(selectedRoutes.map(a => a.edge_w))
+        let wScale = d3.scaleSqrt()
+            .range([0,1])
+            .domain([0,maximumWeight])
+
+        let bindedData = container.selectAll("line")
+                         .data(selectedRoutes, d => d.Targets) //This second parameter tells D3 what to use to identify the routes, this hepls D3 to correctly find which routes have been added or removed.
+
+            bindedData.enter()
+                      .append("line")
+                      .attr("x1", d => projection([+d.SourceLongitude, +d.SourceLatitude])[0])
+                      .attr("y1", d => projection([+d.SourceLongitude, +d.SourceLatitude])[1])
+                      .attr("x2", d => projection([+d.DestLongitude, +d.DestLatitude])[0])
+                      .attr("y2", d => projection([+d.DestLongitude, +d.DestLatitude])[1])
+                      .style("stroke", "#992a2a")
+                      .style("opacity",(d) => wScale(d.edge_w))
+            
+            bindedData.exit()
+                      .remove()
+              
+
+    }
+
+ </script>
+
+</html>
