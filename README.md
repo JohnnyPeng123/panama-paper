@@ -1,5 +1,6 @@
 # panama-paper
 View this visualization from:
+
 https://htmlpreview.github.io/?https://github.com/JohnnyPeng123/panama-paper/master/index.html
 
 ![alt text](https://github.com/JohnnyPeng123/panama-paper/blob/master/screen-shot.PNG?raw=true)
@@ -9,6 +10,7 @@ big companies and wealthy individuals. Typically, these offshore accounts are in
 for tax evasion purpose.
 
 There are six main marks/elements in this visualization:
+
 1. Base World Map – This is the base map representing the world using Mercator projection, the shape file is from
 the website shown on the right. https://geojson-maps.ash.ms/
 
@@ -31,10 +33,11 @@ Islands(middle), and Seychelles (far right). These are also the top 6 countries 
 country), and they are the top 6 in terms of bank accounts owned by foreign entities, so the result from the bar chart
 reconcile with the result shown from the map.
 
-4. Self-evaluation: strengths and weaknesses
+# Self-evaluation
 
 • (Strength) For read with strong geography knowledge, this visualization provides a lot of geographical information
 to them, and it is able to answers the following geographically related questions very well:
+
 o Is there a cluster of countries that are geographically close to each other and all have a large volume of
 incoming/outgoing edges? Which continent has the most “tax haven”?
 
